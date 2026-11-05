@@ -1,4 +1,6 @@
-data.json
-*.log
+data/state.json
+data/*.tmp
 __pycache__/
+*.pyc
 .DS_Store
+*.log

@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>VIKI Team Hub</title>
+  <style>
+    :root{--bg:#0b1220;--card:#121c2f;--card2:#0f1830;--line:#243457;--text:#e8eefc;--muted:#8ba0c2;--todo:#2b6cb0;--doing:#b7791f;--done:#1f8f5f;--blocked:#b42318}
+    *{box-sizing:border-box} body{margin:0;font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:linear-gradient(180deg,#08101d,#0b1220);color:var(--text)}
+    header{padding:14px 16px;border-bottom:1px solid var(--line);position:sticky;top:0;background:#0b1220ee;backdrop-filter:blur(6px);z-index:2}
+    h1{margin:0;font-size:18px}.sub{color:var(--muted);font-size:12px;margin-top:2px}
+    main{display:grid;grid-template-columns:1fr 1.35fr;gap:12px;padding:12px}
+    @media(max-width:980px){main{grid-template-columns:1fr}}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+    .card h2{margin:0;padding:10px 12px;font-size:14px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
+    .pad{padding:10px 12px}.row{display:flex;gap:8px;flex-wrap:wrap}.row>*{flex:1}
+    input,select,textarea,button{font:inherit;border-radius:8px;border:1px solid var(--line);background:#0e1830;color:var(--text);padding:9px}
+    input,select,textarea{width:100%} textarea{min-height:58px;resize:vertical}
+    button{cursor:pointer;background:#17305f;flex:0 0 auto} button:hover{filter:brightness(1.08)}
+    #msgs{height:48vh;overflow:auto;padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+    .msg{border:1px solid var(--line);border-radius:10px;padding:8px;background:var(--card2)}
+    .meta{color:var(--muted);font-size:12px;margin-bottom:3px}
+    .cols{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:10px 12px}
+    @media(max-width:980px){.cols{grid-template-columns:1fr 1fr}} @media(max-width:560px){.cols{grid-template-columns:1fr}}
+    .col{background:var(--card2);border:1px solid var(--line);border-radius:10px;min-height:120px}
+    .col h3{margin:0;padding:8px 10px;font-size:13px;border-bottom:1px solid var(--line);color:var(--muted)}
+    .task{margin:8px;padding:8px;border:1px solid var(--line);border-radius:10px;background:#101b36}
+    .task b{display:block;margin-bottom:4px}.small{color:var(--muted);font-size:12px}
+    .pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;margin-right:4px}
+    .todo{background:#2b6cb033;color:#93c5fd}.doing{background:#b7791f33;color:#fbd38d}.done{background:#1f8f5f33;color:#86efac}.blocked{background:#b4231833;color:#fca5a5}
+    a{color:#93c5fd;word-break:break-all}
+    .actions{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+    .actions button{padding:4px 8px;font-size:12px}
+    #events{max-height:140px;overflow:auto}
+  </style>
+</head>
+<body>
+<header>
+  <h1>VIKI Team Hub</h1>
+  <div class="sub">Chat + tablero para León, VIKI y OpenCode. Base simple (inspirada en ESP32-Web-Chat + kanban JSON). Actualiza cada 2 s.</div>
+  <div class="sub" id="online"></div>
+</header>
+<main>
+  <section class="card">
+    <h2>Chat <span class="small">tiempo casi real por polling</span></h2>
+    <div id="msgs"></div>
+    <div class="pad">
+      <div class="row"><select id="author"><option>León</option><option selected>VIKI</option><option>OpenCode</option></select></div>
+      <div class="row" style="margin-top:8px"><textarea id="mtext" placeholder="Mensaje, estado o resumen..."></textarea></div>
+      <div class="row" style="margin-top:8px"><button onclick="sendMsg()">Enviar</button><button onclick="refresh()">Actualizar</button></div>
+    </div>
+  </section>
+  <section class="card">
+    <h2>Tablero <span class="small">pendiente / en progreso / hecho / bloqueado</span></h2>
+    <div class="pad">
+      <div class="row"><input id="ttitle" placeholder="Nueva tarea"/></div>
+      <div class="row" style="margin-top:8px">
+        <select id="towner"><option>OpenCode</option><option>VIKI</option><option>León</option></select>
+        <select id="tstatus"><option value="todo">pendiente</option><option value="doing">en progreso</option><option value="done">hecho</option><option value="blocked">bloqueado</option></select>
+      </div>
+      <div class="row" style="margin-top:8px"><input id="tlink" placeholder="Link (opcional)"/></div>
+      <div class="row" style="margin-top:8px"><input id="tnote" placeholder="Nota/progreso (opcional)"/></div>
+      <div class="row" style="margin-top:8px"><button onclick="addTask()">Agregar tarea</button></div>
+    </div>
+    <div class="cols" id="cols"></div>
+    <div class="pad small" id="events"></div>
+  </section>
+</main>
+<script>
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+const labels={todo:'pendiente',doing:'en progreso',done:'hecho',blocked:'bloqueado'};
+async function api(p,o={}){const author=document.getElementById('author')?.value||'VIKI'; const r=await fetch(p,{headers:{'Content-Type':'application/json','X-Viki-Author':author},...o}); return r.json()}
+function taskCard(t){
+  return `<div class="task"><b>${esc(t.title)}</b><div class="small"><span class="pill ${t.status}">${labels[t.status]||t.status}</span> ${esc(t.owner||'')} · ${esc(t.updated_at||'')}</div>${t.link?`<div class="small"><a href="${esc(t.link)}" target="_blank">abrir link</a></div>`:''}${t.note?`<div class="small">${esc(t.note)}</div>`:''}<div class="actions"><button onclick="setStatus('${t.id}','todo')">pend.</button><button onclick="setStatus('${t.id}','doing')">prog.</button><button onclick="setStatus('${t.id}','done')">hecho</button><button onclick="setStatus('${t.id}','blocked')">bloq.</button></div></div>`;
+}
+async function refresh(){
+  try{
+    const s=await api('/api/state');
+    document.getElementById('online').textContent='Activos: '+Object.entries(s.online||{}).sort((a,b)=>b[1].localeCompare(a[1])).map(([k,v])=>`${k} (${v})`).join(' · ');
+    const m=document.getElementById('msgs'); const bottom=m.scrollTop+m.clientHeight>=m.scrollHeight-30;
+    m.innerHTML=(s.messages||[]).slice().reverse().map(x=>`<div class="msg"><div class="meta">${esc(x.at)} · <b>${esc(x.author)}</b></div><div>${esc(x.text).replace(/\n/g,'<br>')}</div></div>`).join('');
+    if(bottom) m.scrollTop=m.scrollHeight;
+    const groups={todo:[],doing:[],done:[],blocked:[]}; (s.tasks||[]).forEach(t=> (groups[t.status]||groups.todo).push(t));
+    document.getElementById('cols').innerHTML=Object.entries(groups).map(([k,arr])=>`<div class="col"><h3>${labels[k]} (${arr.length})</h3>${arr.map(taskCard).join('')||'<div class="small" style="padding:8px 10px">Sin tareas</div>'}</div>`).join('');
+    document.getElementById('events').innerHTML='<b>Bitácora:</b><br>'+((s.events||[]).slice(0,10).map(e=>`${esc(e.at)} — ${esc(e.who)}: ${esc(e.what)}`).join('<br>')||'—');
+  }catch(e){}
+}
+async function sendMsg(){const text=document.getElementById('mtext').value.trim(); if(!text) return; await api('/api/messages',{method:'POST',body:JSON.stringify({author:document.getElementById('author').value,text})}); document.getElementById('mtext').value=''; refresh();}
+async function addTask(){const title=document.getElementById('ttitle').value.trim(); if(!title) return; await api('/api/tasks',{method:'POST',body:JSON.stringify({title,owner:document.getElementById('towner').value,status:document.getElementById('tstatus').value,link:document.getElementById('tlink').value.trim(),note:document.getElementById('tnote').value.trim(),author:document.getElementById('author').value})}); ['ttitle','tlink','tnote'].forEach(id=>document.getElementById(id).value=''); refresh();}
+async function setStatus(id,status){await api('/api/tasks/'+id,{method:'PATCH',body:JSON.stringify({status,author:document.getElementById('author').value})}); refresh();}
+refresh(); setInterval(refresh,2000);
+</script>
+</body></html>
